@@ -6,10 +6,12 @@ State is shared through SQLite (WAL mode for concurrent access).
 
 from __future__ import annotations
 
+import atexit
 import datetime
 import functools
 import json
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -48,6 +50,27 @@ if log_tools:
     _tool_logger.addHandler(_handler)
 
 
+# Daemon subprocess tracking (for run_tree mode)
+_daemon_proc: subprocess.Popen | None = None
+_daemon_logs: list = []  # open file handles for daemon stdout/stderr
+
+
+def _cleanup_daemon() -> None:
+    """Terminate daemon subprocess and close log handles on exit."""
+    if _daemon_proc and _daemon_proc.poll() is None:
+        _daemon_proc.terminate()
+        try:
+            _daemon_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _daemon_proc.kill()
+    for f in _daemon_logs:
+        if f and not f.closed:
+            f.close()
+
+
+atexit.register(_cleanup_daemon)
+
+
 def _log_tool_call(tool_name: str, params: dict, result: str) -> None:
     """Log a tool call to .cord/tools.log as JSONL."""
     if _tool_logger is None:
@@ -83,8 +106,8 @@ def _require_agent_id() -> str | None:
     """Return error JSON if agent_id is not set, else None."""
     if not agent_id:
         return json.dumps({
-            "error": "No agent_id set. Call init_tree() first to bootstrap "
-            "the coordination tree, or ensure --agent-id is passed."
+            "error": "No agent_id set. Call init_tree() or run_tree() first "
+            "to bootstrap the coordination tree, or ensure --agent-id is passed."
         })
     return None
 
@@ -135,6 +158,76 @@ def init_tree(goal: str) -> str:
     )
     agent_id = root_id
     return json.dumps({"root": root_id, "goal": goal})
+
+
+@mcp.tool()
+@logged
+def run_tree(goal: str, prompt: str = "", budget: float = 2.0,
+             model: str = "sonnet") -> str:
+    """Launch a full coordination tree. Creates DB, root node, and starts
+    the daemon to manage the entire agent tree autonomously.
+
+    Args:
+        goal: What the root agent should accomplish.
+        prompt: Optional detailed instructions/context for the root agent.
+        budget: Max USD per agent subprocess (default 2.0).
+        model: Claude model for agents (default sonnet).
+
+    Monitor with read_tree(). Intervene with pause/stop/modify/resume.
+    Inject additional work with spawn()."""
+    global agent_id, _daemon_proc, _daemon_logs
+
+    # Stop previous daemon and close its log handles
+    if _daemon_proc and _daemon_proc.poll() is None:
+        _daemon_proc.terminate()
+        _daemon_proc.wait()
+    for f in _daemon_logs:
+        if f and not f.closed:
+            f.close()
+    _daemon_logs.clear()
+
+    # Create fresh DB
+    db_file = Path(db_path)
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    if db_file.exists():
+        db_file.unlink()
+
+    # Create root node (pending — daemon will launch it)
+    db = CordDB(str(db_file))
+    root_id = db.create_node(
+        node_type="goal",
+        goal=goal,
+        prompt=prompt or None,
+        status="pending",
+    )
+    agent_id = root_id  # Full authority over tree
+
+    # Start daemon with --launch-root
+    cord_dir = db_file.parent
+    cmd = ["cord", "daemon", "--launch-root",
+           "--budget", str(budget), "--model", model]
+    if log_tools:
+        cmd.append("--log-tools")
+
+    # Resolve project dir (parent of .cord/)
+    project_dir = str(cord_dir.parent)
+
+    fout = open(str(cord_dir / "daemon.stdout.log"), "w")
+    ferr = open(str(cord_dir / "daemon.stderr.log"), "w")
+    _daemon_logs.extend([fout, ferr])
+
+    _daemon_proc = subprocess.Popen(
+        cmd, stdout=fout, stderr=ferr, cwd=project_dir,
+    )
+
+    return json.dumps({
+        "root": root_id,
+        "goal": goal,
+        "daemon_pid": _daemon_proc.pid,
+        "status": "launched",
+        "usage": "Monitor with read_tree(). Intervene with "
+                 "pause/stop/modify/resume. Inject work with spawn().",
+    })
 
 
 @mcp.tool()
@@ -261,7 +354,7 @@ def _check_subtree(db: CordDB, node_id: str) -> str | None:
         return json.dumps({"error": f"Node {node_id} not found"})
     if not agent_id:
         return json.dumps({
-            "error": "No agent_id set. Call init_tree() first."
+            "error": "No agent_id set. Call init_tree() or run_tree() first."
         })
     if not _is_descendant(db, agent_id, node_id):
         return json.dumps({

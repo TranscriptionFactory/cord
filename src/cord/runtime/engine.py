@@ -72,13 +72,20 @@ class Engine:
                     self.db.update_status(node["node_id"], "cancelled")
             self._print_tree()
 
-    def run_daemon(self) -> None:
+    def run_daemon(self, launch_root: bool = False) -> None:
         """Run in daemon mode: watch an existing DB, manage child agents.
 
-        Does NOT create a new DB or root node (Claude Code is the root).
+        Args:
+            launch_root: If True, also launch and synthesize the root node
+                (Mode 3: managed run). If False, Claude Code is the root
+                (Mode 2: MCP integration).
         """
-        self._log("cord daemon: watching .cord/cord.db ...")
-        self._log("  Root agent is Claude Code. Spawned children will be launched here.")
+        if launch_root:
+            self.skip_root_synthesis = False
+            self._log("cord daemon (managed run): launching root + children")
+        else:
+            self._log("cord daemon: watching .cord/cord.db ...")
+            self._log("  Root agent is Claude Code. Spawned children will be launched here.")
         self._log("")
 
         try:
@@ -89,8 +96,8 @@ class Engine:
             for node in self.db.all_nodes():
                 if node["status"] == "active":
                     root = self.db.get_root()
-                    # Don't cancel the root — Claude Code owns it
-                    if root and node["node_id"] == root["node_id"]:
+                    # Skip root cancellation only when Claude Code owns it
+                    if not launch_root and root and node["node_id"] == root["node_id"]:
                         continue
                     self.db.update_status(node["node_id"], "cancelled")
             self._print_tree()

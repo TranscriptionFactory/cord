@@ -25,7 +25,7 @@ def main() -> None:
         print("Usage:")
         print('  cord run "goal description" [--budget <usd>] [--model <model>] [--log-tools]')
         print('  cord run plan.md [--budget <usd>] [--model <model>] [--log-tools]')
-        print('  cord daemon [--budget <usd>] [--model <model>] [--log-tools]')
+        print('  cord daemon [--budget <usd>] [--model <model>] [--log-tools] [--launch-root]')
         sys.exit(0)
 
     command = args[0]
@@ -50,15 +50,17 @@ def main() -> None:
         engine.run()
 
     elif command == "daemon":
+        launch_root = "--launch-root" in args
         engine = Engine(
-            goal="(daemon — root managed by Claude Code)",
+            goal="(managed run)" if launch_root
+                 else "(daemon — root managed by Claude Code)",
             max_budget_usd=budget,
             model=model,
             fresh_db=False,
-            skip_root_synthesis=True,
+            skip_root_synthesis=not launch_root,
             log_tools=log_tools_flag,
         )
-        engine.run_daemon()
+        engine.run_daemon(launch_root=launch_root)
 
     else:
         print(f"Unknown command: {command}", file=sys.stderr)

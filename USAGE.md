@@ -1,6 +1,6 @@
 # Cord Usage Guide
 
-Cord can run in two modes: **standalone** (`cord run`) where cord is the orchestrator, or **MCP integration** where Claude Code is the root agent and cord manages child processes.
+Cord can run in three modes: **standalone** (`cord run`), **MCP integration** (Claude Code as root agent), or **managed run** (`run_tree()` — cord runs autonomously, Claude Code supervises via MCP).
 
 ---
 
@@ -104,7 +104,8 @@ Call complete("Final synthesis: ...")
 
 | Tool | Description |
 |------|-------------|
-| `init_tree(goal)` | Bootstrap a fresh coordination tree. Creates DB, root node, sets agent ID. |
+| `run_tree(goal, prompt, budget, model)` | Launch a full autonomous tree (Mode 3). Creates DB, root, starts daemon. |
+| `init_tree(goal)` | Bootstrap a fresh coordination tree (Mode 2). Creates DB, root node, sets agent ID. |
 | `spawn(goal, prompt, returns, blocked_by)` | Create a child task under your node |
 | `fork(goal, prompt, returns, blocked_by)` | Create a child that inherits sibling context |
 | `complete(result)` | Mark your node as complete with a result |
@@ -121,8 +122,75 @@ Call complete("Final synthesis: ...")
 If you call `spawn`, `fork`, `complete`, or `ask` without first calling `init_tree()` (or without `--agent-id` being set), you'll get:
 
 ```json
-{"error": "No agent_id set. Call init_tree() first to bootstrap the coordination tree, or ensure --agent-id is passed."}
+{"error": "No agent_id set. Call init_tree() or run_tree() first to bootstrap the coordination tree, or ensure --agent-id is passed."}
 ```
+
+---
+
+## Mode 3: Managed Run (Claude Code as supervisor)
+
+In this mode, Claude Code describes the problem and cord handles everything autonomously — creating the root agent, spawning children, synthesis — just like `cord run`, but with full MCP visibility and control.
+
+Claude Code is **not** the root agent. It's the supervisor: it launches the tree, monitors progress, and can intervene.
+
+### Workflow
+
+**Step 1: Launch the tree**
+
+```
+Call run_tree("Build a metabolomics analysis pipeline")
+```
+
+Or with detailed instructions:
+
+```
+Call run_tree(
+  goal="Build a metabolomics analysis pipeline",
+  prompt="Focus on LCMS data. Use mzML format. Compare at least 3 normalization methods.",
+  budget=3.0,
+  model="opus"
+)
+```
+
+Returns: `{"root": "#1", "goal": "...", "daemon_pid": ..., "status": "launched"}`
+
+Cord creates the DB, root node, and starts a daemon that launches the root agent as a subprocess. The root agent decomposes the goal, spawns children, and cord manages the full lifecycle including synthesis.
+
+**Step 2: Monitor progress**
+
+```
+Call read_tree()
+```
+
+Returns the full tree with statuses and results for all nodes.
+
+**Step 3: Intervene (optional)**
+
+```
+Call pause("#3")                                   — pause a wayward agent
+Call modify("#3", goal="Updated direction")         — redirect paused work
+Call resume("#3")                                   — resume after modification
+Call stop("#4")                                     — cancel unnecessary work
+Call spawn("Additional edge-case analysis")         — inject new top-level work
+```
+
+**Step 4: Read results**
+
+When the tree completes, `read_tree()` shows all results including the root's synthesized output.
+
+### Mode 3 vs Mode 1 vs Mode 2
+
+| | `cord run` (Mode 1) | MCP Integration (Mode 2) | Managed Run (Mode 3) |
+|---|---|---|---|
+| **Root agent** | Claude subprocess | Claude Code (you) | Claude subprocess |
+| **Supervisor** | None | You | Claude Code |
+| **Creates DB** | Yes | `init_tree()` | `run_tree()` |
+| **Launches root** | Yes | No (you are root) | Yes (via daemon) |
+| **Launches children** | Yes | `cord daemon` | `cord daemon --launch-root` |
+| **Synthesizes root** | Yes | You call `complete()` | Yes (automatic) |
+| **MCP visibility** | None | Full | Full |
+| **Intervention** | None | Full | Full |
+| **Use case** | Fire-and-forget | Interactive, hands-on | Supervised autonomy |
 
 ---
 
@@ -165,17 +233,6 @@ for tool, n in c.most_common(): print(f'{tool}: {n}')
 
 ---
 
-## Daemon vs Run: When to Use Which
-
-| | `cord run` | `cord daemon` |
-|---|---|---|
-| **Root agent** | Claude CLI subprocess | Claude Code (you) |
-| **Creates DB** | Yes (fresh each time) | No (uses existing) |
-| **Creates root node** | Yes | No (`init_tree()` does) |
-| **Launches children** | Yes | Yes |
-| **Synthesizes root** | Yes (relaunches root) | No (you synthesize) |
-| **Use case** | Fire-and-forget tasks | Interactive control, MCP integration |
-
 ---
 
 ## Project Structure
@@ -190,5 +247,5 @@ src/cord/
         dispatcher.py       # Launch claude CLI processes
         process_manager.py  # Track subprocesses
     mcp/
-        server.py           # MCP tools (init_tree + 10 coordination tools)
+        server.py           # MCP tools (init_tree, run_tree + 10 coordination tools)
 ```
