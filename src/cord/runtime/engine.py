@@ -143,10 +143,16 @@ class Engine:
 
             time.sleep(self.poll_interval)
 
+    @property
+    def _agent_log_dir(self) -> Path:
+        """Directory for per-agent log files."""
+        return self.db_path.parent / "agents"
+
     def _launch_node(self, node_id: str) -> None:
         prompt = build_agent_prompt(self.db, node_id)
         self.db.update_status(node_id, "active")
 
+        log_dir = self._agent_log_dir
         process = launch_agent(
             self.db_path,
             node_id,
@@ -155,8 +161,10 @@ class Engine:
             model=self.model,
             project_dir=self.project_dir,
             log_tools=self.log_tools,
+            log_dir=log_dir,
         )
-        self.process_manager.register(node_id, process)
+        stdout_path = log_dir / f"{node_id.lstrip('#')}.stdout.log"
+        self.process_manager.register(node_id, process, stdout_path=stdout_path)
 
     def _handle_completion(self, node_id: str, return_code: int, stdout: str) -> None:
         node = self.db.get_node(node_id)
@@ -213,6 +221,7 @@ class Engine:
         # Relaunch parent for synthesis
         self.db.update_status(parent_id, "active")
         prompt = build_synthesis_prompt(self.db, parent_id)
+        log_dir = self._agent_log_dir
         process = launch_agent(
             self.db_path,
             parent_id,
@@ -221,8 +230,10 @@ class Engine:
             model=self.model,
             project_dir=self.project_dir,
             log_tools=self.log_tools,
+            log_dir=log_dir,
         )
-        self.process_manager.register(parent_id, process)
+        stdout_path = log_dir / f"{parent_id.lstrip('#')}.stdout.log"
+        self.process_manager.register(parent_id, process, stdout_path=stdout_path)
 
     def _handle_ask(self, node: dict) -> None:
         """Handle an ask node: prompt the human, read input, store answer."""

@@ -10,12 +10,13 @@ When cord is configured as an MCP server (via `.claude/mcp.json`), use **Mode 3 
 
 1. **Launch**: Call `run_tree(goal, prompt)` with the user's problem description
 2. **Poll**: Call `read_tree()` every 30-60 seconds to monitor progress
-3. **Intervene** (if needed):
+3. **Inspect** (if needed): Call `read_logs(node_id)` to see what an agent is doing or why it failed
+4. **Intervene** (if needed):
    - `pause(node_id)` / `resume(node_id)` — pause/resume a specific agent
    - `modify(node_id, goal=..., prompt=...)` — redirect a paused/pending agent
    - `stop(node_id)` — cancel a node entirely
    - `spawn(goal)` — inject additional work into the tree
-4. **Report**: When all nodes show `complete`, relay the root's result to the user
+5. **Report**: When all nodes show `complete`, relay the root's result to the user
 
 ### When to use Mode 2 instead
 

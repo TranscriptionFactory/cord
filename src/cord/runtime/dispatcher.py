@@ -58,8 +58,15 @@ def launch_agent(
     model: str = "sonnet",
     project_dir: Path | None = None,
     log_tools: bool = False,
+    log_dir: Path | None = None,
 ) -> subprocess.Popen[str]:
-    """Launch a claude CLI process for a node."""
+    """Launch a claude CLI process for a node.
+
+    Args:
+        log_dir: If set, write agent stdout/stderr to log files in this
+            directory (e.g. .cord/agents/). Uses append mode so synthesis
+            reruns append to the same file.
+    """
     proj = project_dir or db_path.parent
     mcp_config = generate_mcp_config(db_path, node_id, proj, log_tools=log_tools)
 
@@ -80,12 +87,25 @@ def launch_agent(
 
     cwd = str(work_dir) if work_dir else str(proj)
 
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=cwd,
-    )
+    # Log agent output to files when log_dir is set
+    if log_dir:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        node_num = node_id.lstrip("#")
+        fout = open(log_dir / f"{node_num}.stdout.log", "a")
+        ferr = open(log_dir / f"{node_num}.stderr.log", "a")
+        process = subprocess.Popen(
+            cmd, stdout=fout, stderr=ferr, text=True, cwd=cwd,
+        )
+        # Safe to close — child process has its own file descriptors
+        fout.close()
+        ferr.close()
+    else:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
+        )
 
     return process

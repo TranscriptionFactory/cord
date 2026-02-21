@@ -6,13 +6,14 @@ import os
 import signal
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
 class ProcessInfo:
     node_id: str
     process: subprocess.Popen[str]
-    stdout_lines: list[str] = field(default_factory=list)
+    stdout_path: Path | None = None
 
 
 class ProcessManager:
@@ -21,9 +22,21 @@ class ProcessManager:
     def __init__(self) -> None:
         self._processes: dict[str, ProcessInfo] = {}
 
-    def register(self, node_id: str, process: subprocess.Popen[str]) -> None:
-        """Register a subprocess for a node."""
-        self._processes[node_id] = ProcessInfo(node_id=node_id, process=process)
+    def register(
+        self,
+        node_id: str,
+        process: subprocess.Popen[str],
+        stdout_path: Path | None = None,
+    ) -> None:
+        """Register a subprocess for a node.
+
+        Args:
+            stdout_path: Path to the agent's stdout log file. When set,
+                poll_completions reads stdout from this file instead of PIPE.
+        """
+        self._processes[node_id] = ProcessInfo(
+            node_id=node_id, process=process, stdout_path=stdout_path,
+        )
 
     def poll_completions(self) -> list[tuple[str, int, str]]:
         """Poll all registered processes for completions.
@@ -35,7 +48,9 @@ class ProcessManager:
             rc = info.process.poll()
             if rc is not None:
                 stdout = ""
-                if info.process.stdout:
+                if info.stdout_path and info.stdout_path.exists():
+                    stdout = info.stdout_path.read_text()
+                elif info.process.stdout:
                     stdout = info.process.stdout.read() or ""
                 completed.append((node_id, rc, stdout))
                 del self._processes[node_id]

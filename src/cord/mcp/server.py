@@ -269,6 +269,44 @@ def read_node(node_id: str) -> str:
 
 @mcp.tool()
 @logged
+def read_logs(node_id: str, stream: str = "stdout", tail: int = 100) -> str:
+    """Read an agent's log output. Use to inspect what an agent is doing
+    or has done — especially useful for debugging failed nodes.
+
+    Args:
+        node_id: Node ID (e.g. '#2').
+        stream: 'stdout' for agent output, 'stderr' for Claude CLI progress.
+        tail: Number of lines to return from the end (default 100, 0 for all).
+    """
+    if stream not in ("stdout", "stderr"):
+        return json.dumps({"error": "stream must be 'stdout' or 'stderr'"})
+
+    cord_dir = Path(db_path).parent
+    node_num = node_id.lstrip("#")
+    log_path = cord_dir / "agents" / f"{node_num}.{stream}.log"
+
+    if not log_path.exists():
+        return json.dumps({
+            "error": f"No {stream} log for {node_id}",
+            "path": str(log_path),
+        })
+
+    text = log_path.read_text()
+    if tail > 0:
+        lines = text.splitlines()
+        if len(lines) > tail:
+            text = "\n".join(lines[-tail:])
+
+    return json.dumps({
+        "node_id": node_id,
+        "stream": stream,
+        "lines": len(text.splitlines()),
+        "content": text,
+    })
+
+
+@mcp.tool()
+@logged
 def spawn(goal: str, prompt: str = "", returns: str = "text",
           blocked_by: list[str] | None = None) -> str:
     """Create a child task under the root node. The daemon launches it as

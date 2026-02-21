@@ -215,7 +215,17 @@ Call read_tree()
 
 Returns the full tree with statuses and results for all nodes.
 
-**Step 3: Intervene (optional)**
+**Step 3: Inspect agent output (optional)**
+
+```
+Call read_logs("#2")                                 — see agent #2's stdout (last 100 lines)
+Call read_logs("#2", stream="stderr")                — see Claude CLI progress/errors
+Call read_logs("#2", tail=0)                         — see full output (all lines)
+```
+
+Agent logs are saved to `.cord/agents/{id}.stdout.log` and `.cord/agents/{id}.stderr.log`. They persist after the tree completes.
+
+**Step 4: Intervene (optional)**
 
 ```
 Call pause("#3")                                    — pause a wayward agent
@@ -225,7 +235,7 @@ Call stop("#4")                                      — cancel unnecessary work
 Call spawn("Additional edge-case analysis")          — inject new top-level work
 ```
 
-**Step 4: Read results**
+**Step 5: Read results**
 
 When the tree completes, `read_tree()` shows all results including the root's synthesized output.
 
@@ -244,6 +254,7 @@ These tools are available in Modes 2 and 3 via the cord MCP server.
 | `complete(result)` | 2 | Mark the root as complete with a result |
 | `read_tree()` | 2, 3 | Get the full coordination tree as JSON |
 | `read_node(node_id)` | 2, 3 | Get a single node's details |
+| `read_logs(node_id, stream, tail)` | 2, 3 | Read an agent's stdout/stderr log output |
 | `ask(question, options)` | 2, 3 | Request input from a human or parent |
 | `stop(node_id)` | 2, 3 | Cancel a node in your subtree |
 | `pause(node_id)` | 2, 3 | Pause an active node |
@@ -295,6 +306,32 @@ import json, sys, collections
 c = collections.Counter(json.loads(l)['tool'] for l in sys.stdin)
 for tool, n in c.most_common(): print(f'{tool}: {n}')
 "
+```
+
+### Agent logs
+
+Each agent's stdout and stderr are saved to `.cord/agents/`:
+
+```
+.cord/agents/
+    1.stdout.log    # Root agent output
+    1.stderr.log    # Root agent Claude CLI progress
+    2.stdout.log    # Child #2 output
+    2.stderr.log    # Child #2 Claude CLI progress
+    ...
+```
+
+Logs use append mode — if an agent is relaunched for synthesis, its output appends to the same file.
+
+View via MCP: `read_logs("#2")` or `read_logs("#2", stream="stderr")`.
+
+View from terminal:
+```bash
+# Watch an agent's output live
+tail -f .cord/agents/2.stdout.log
+
+# See all agent outputs
+cat .cord/agents/*.stdout.log
 ```
 
 ---
