@@ -31,7 +31,7 @@ def generate_mcp_config(
     """Generate MCP config that spawns a stdio server for this agent."""
     args = [
         "run",
-        "--directory", str(project_dir.resolve()),
+        "--project", str(project_dir.resolve()),
         "cord-mcp-server",
         "--db-path", str(db_path.resolve()),
         "--agent-id", agent_id,

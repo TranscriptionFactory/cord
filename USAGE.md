@@ -44,7 +44,7 @@ Add cord to your project's Claude Code MCP config at `.claude/mcp.json`:
       "command": "uv",
       "args": [
         "run",
-        "--directory", "/path/to/cord",
+        "--project", "/path/to/cord",
         "cord-mcp-server"
       ]
     }
