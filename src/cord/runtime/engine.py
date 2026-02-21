@@ -159,7 +159,6 @@ class Engine:
             prompt,
             max_budget_usd=self.max_budget_usd,
             model=self.model,
-            project_dir=self.project_dir,
             log_tools=self.log_tools,
             log_dir=log_dir,
         )
@@ -228,7 +227,6 @@ class Engine:
             prompt,
             max_budget_usd=self.max_budget_usd,
             model=self.model,
-            project_dir=self.project_dir,
             log_tools=self.log_tools,
             log_dir=log_dir,
         )
