@@ -59,6 +59,7 @@ def launch_agent(
     project_dir: Path | None = None,
     log_tools: bool = False,
     log_dir: Path | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> subprocess.Popen[str]:
     """Launch a claude CLI process for a node.
 
@@ -66,6 +67,9 @@ def launch_agent(
         log_dir: If set, write agent stdout/stderr to log files in this
             directory (e.g. .cord/agents/). Uses append mode so synthesis
             reruns append to the same file.
+        allowed_tools: If set, restrict agent to these tools via --allowedTools.
+            If None (default), agent can use all available tools (built-in +
+            MCP servers from global config and cord's own server).
     """
     proj = project_dir or db_path.parent
     mcp_config = generate_mcp_config(db_path, node_id, proj, log_tools=log_tools)
@@ -80,10 +84,12 @@ def launch_agent(
         "-p", prompt,
         "--model", model,
         "--mcp-config", str(config_path),
-        "--allowedTools", " ".join(MCP_TOOLS),
         "--dangerously-skip-permissions",
         "--max-budget-usd", str(max_budget_usd),
     ]
+
+    if allowed_tools is not None:
+        cmd.extend(["--allowedTools", " ".join(allowed_tools)])
 
     cwd = str(work_dir) if work_dir else str(proj)
 
