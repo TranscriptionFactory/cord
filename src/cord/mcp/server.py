@@ -139,9 +139,14 @@ mcp = FastMCP("cord")
 @mcp.tool()
 @logged
 def init_tree(goal: str) -> str:
-    """Bootstrap a fresh coordination tree. Creates .cord/ dir + SQLite DB,
-    creates the root node (#1), and sets this server as the root agent.
-    Call this before spawn/fork/complete when using cord from Claude Code."""
+    """Bootstrap a coordination tree with YOU as the root agent (Mode 2).
+
+    Creates .cord/cord.db, inserts root node #1, and sets this session as
+    agent #1. After calling this, start `cord daemon` in the background,
+    then use spawn/fork to create child tasks, and complete() when done.
+
+    For autonomous operation (Mode 3), use run_tree() instead — it handles
+    the daemon automatically and you just monitor with read_tree()."""
     global agent_id
 
     db_file = Path(db_path)
@@ -164,17 +169,24 @@ def init_tree(goal: str) -> str:
 @logged
 def run_tree(goal: str, prompt: str = "", budget: float = 2.0,
              model: str = "sonnet") -> str:
-    """Launch a full coordination tree. Creates DB, root node, and starts
-    the daemon to manage the entire agent tree autonomously.
+    """Launch an autonomous multi-agent tree (Mode 3 — recommended).
+
+    Cord creates a root agent, which decomposes the goal into subtasks,
+    spawns child agents, and synthesizes their results — all automatically.
+    You are the supervisor: monitor and intervene, but don't need to do
+    the work yourself.
 
     Args:
         goal: What the root agent should accomplish.
         prompt: Optional detailed instructions/context for the root agent.
-        budget: Max USD per agent subprocess (default 2.0).
-        model: Claude model for agents (default sonnet).
+        budget: Max USD per agent subprocess.
+        model: Claude model for agents (sonnet, opus, haiku).
 
-    Monitor with read_tree(). Intervene with pause/stop/modify/resume.
-    Inject additional work with spawn()."""
+    After calling run_tree:
+      1. Poll read_tree() periodically to monitor progress
+      2. Intervene if needed: pause/resume/stop/modify any node by ID
+      3. Inject additional work with spawn("new task")
+      4. When tree completes, read the root's synthesized result"""
     global agent_id, _daemon_proc, _daemon_logs
 
     # Stop previous daemon and close its log handles
@@ -233,7 +245,9 @@ def run_tree(goal: str, prompt: str = "", budget: float = 2.0,
 @mcp.tool()
 @logged
 def read_tree() -> str:
-    """Returns the full coordination tree as JSON."""
+    """Get the full coordination tree as JSON — statuses, results, and
+    dependencies for every node. Call periodically after run_tree() or
+    init_tree() to monitor progress."""
     db = _get_db()
     tree = db.get_tree()
     if not tree:
@@ -244,7 +258,8 @@ def read_tree() -> str:
 @mcp.tool()
 @logged
 def read_node(node_id: str) -> str:
-    """Returns a single node's details by ID (e.g. '#1')."""
+    """Get a single node's details by ID (e.g. '#2'). Use instead of
+    read_tree() when you only need one node's status or result."""
     db = _get_db()
     node = db.get_node(node_id)
     if not node:
@@ -256,8 +271,10 @@ def read_node(node_id: str) -> str:
 @logged
 def spawn(goal: str, prompt: str = "", returns: str = "text",
           blocked_by: list[str] | None = None) -> str:
-    """Create a spawned child node under your node.
-    Use blocked_by to declare dependencies on other node IDs (e.g. ['#2', '#3'])."""
+    """Create a child task under the root node. The daemon launches it as
+    a Claude subprocess. In Mode 2, use this to decompose your work. In
+    Mode 3, use this to inject additional work into a running tree.
+    Use blocked_by to declare dependencies (e.g. ['#2', '#3'])."""
     if err := _require_agent_id():
         return err
     db = _get_db()
@@ -276,8 +293,9 @@ def spawn(goal: str, prompt: str = "", returns: str = "text",
 @logged
 def fork(goal: str, prompt: str = "", returns: str = "text",
          blocked_by: list[str] | None = None) -> str:
-    """Create a forked child node (inherits parent context) under your node.
-    Use blocked_by to declare dependencies on other node IDs."""
+    """Create a child that inherits completed sibling results as context.
+    Like spawn(), but the child sees what siblings have already produced.
+    Use for iterative refinement or tasks that build on prior work."""
     if err := _require_agent_id():
         return err
     db = _get_db()
@@ -295,7 +313,9 @@ def fork(goal: str, prompt: str = "", returns: str = "text",
 @mcp.tool()
 @logged
 def complete(result: str = "") -> str:
-    """Mark your node as complete with a result. Call this when your task is done."""
+    """Mark the root node as complete with a result (Mode 2 only).
+    In Mode 3 (run_tree), the root agent completes automatically after
+    synthesis — you don't need to call this."""
     if err := _require_agent_id():
         return err
     db = _get_db()
@@ -339,7 +359,8 @@ def _is_descendant(db: CordDB, agent_id: str, target_id: str) -> bool:
 @mcp.tool()
 @logged
 def stop(node_id: str) -> str:
-    """Cancel a node in your subtree."""
+    """Cancel a node and prevent it from running. Use to cut off
+    unnecessary or wayward work (e.g. stop('#3'))."""
     db = _get_db()
     if err := _check_subtree(db, node_id):
         return err
@@ -368,7 +389,8 @@ def _check_subtree(db: CordDB, node_id: str) -> str | None:
 @mcp.tool()
 @logged
 def pause(node_id: str) -> str:
-    """Pause an active node in your subtree. The runtime will stop its process."""
+    """Pause an active node. Its process stops but can be resumed later.
+    Use with modify() to redirect work, then resume()."""
     db = _get_db()
     if err := _check_subtree(db, node_id):
         return err
@@ -382,7 +404,7 @@ def pause(node_id: str) -> str:
 @mcp.tool()
 @logged
 def resume(node_id: str) -> str:
-    """Resume a paused node in your subtree. The runtime will relaunch it."""
+    """Resume a paused node. The daemon will relaunch its process."""
     db = _get_db()
     if err := _check_subtree(db, node_id):
         return err
@@ -396,7 +418,8 @@ def resume(node_id: str) -> str:
 @mcp.tool()
 @logged
 def modify(node_id: str, goal: str | None = None, prompt: str | None = None) -> str:
-    """Update the goal and/or prompt of a pending or paused node in your subtree."""
+    """Update the goal and/or prompt of a pending or paused node.
+    Use after pause() to redirect an agent before resume()."""
     db = _get_db()
     if err := _check_subtree(db, node_id):
         return err
