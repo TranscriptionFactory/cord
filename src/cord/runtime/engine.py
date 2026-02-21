@@ -26,17 +26,22 @@ class Engine:
         max_budget_usd: float = 2.0,
         model: str = "sonnet",
         project_dir: Path | None = None,
+        fresh_db: bool = True,
+        skip_root_synthesis: bool = False,
+        log_tools: bool = False,
     ):
         self.goal = goal
         self.project_dir = (project_dir or Path.cwd()).resolve()
         self.db_path = db_path or (self.project_dir / ".cord" / "cord.db")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        # Fresh DB for each run
-        if self.db_path.exists():
+        # Fresh DB for each run (unless daemon mode)
+        if fresh_db and self.db_path.exists():
             self.db_path.unlink()
         self.poll_interval = poll_interval
         self.max_budget_usd = max_budget_usd
         self.model = model
+        self.skip_root_synthesis = skip_root_synthesis
+        self.log_tools = log_tools
         self.process_manager = ProcessManager()
         self.db = CordDB(self.db_path)
         self._last_tree_hash = ""
@@ -67,6 +72,29 @@ class Engine:
                     self.db.update_status(node["node_id"], "cancelled")
             self._print_tree()
 
+    def run_daemon(self) -> None:
+        """Run in daemon mode: watch an existing DB, manage child agents.
+
+        Does NOT create a new DB or root node (Claude Code is the root).
+        """
+        self._log("cord daemon: watching .cord/cord.db ...")
+        self._log("  Root agent is Claude Code. Spawned children will be launched here.")
+        self._log("")
+
+        try:
+            self._main_loop()
+        except KeyboardInterrupt:
+            self._log("\nDaemon interrupted. Cancelling all agents...")
+            self.process_manager.cancel_all()
+            for node in self.db.all_nodes():
+                if node["status"] == "active":
+                    root = self.db.get_root()
+                    # Don't cancel the root — Claude Code owns it
+                    if root and node["node_id"] == root["node_id"]:
+                        continue
+                    self.db.update_status(node["node_id"], "cancelled")
+            self._print_tree()
+
     def _main_loop(self) -> None:
         while True:
             if self.db.is_tree_complete():
@@ -87,6 +115,11 @@ class Engine:
                 nid = node["node_id"]
                 if nid in active:
                     continue
+                # In daemon mode, skip the root node (Claude Code manages it)
+                if self.skip_root_synthesis:
+                    root = self.db.get_root()
+                    if root and nid == root["node_id"]:
+                        continue
                 if node["node_type"] == "ask":
                     self._handle_ask(node)
                 else:
@@ -114,6 +147,7 @@ class Engine:
             max_budget_usd=self.max_budget_usd,
             model=self.model,
             project_dir=self.project_dir,
+            log_tools=self.log_tools,
         )
         self.process_manager.register(node_id, process)
 
@@ -154,6 +188,12 @@ class Engine:
         if not children:
             return
 
+        # Skip synthesis for root when in daemon mode (Claude Code synthesizes)
+        if self.skip_root_synthesis:
+            root = self.db.get_root()
+            if root and parent_id == root["node_id"]:
+                return
+
         successful = [c for c in children if c["status"] == "complete"]
         if not successful:
             self.db.update_status(parent_id, "failed")
@@ -173,6 +213,7 @@ class Engine:
             max_budget_usd=self.max_budget_usd,
             model=self.model,
             project_dir=self.project_dir,
+            log_tools=self.log_tools,
         )
         self.process_manager.register(parent_id, process)
 

@@ -1,4 +1,4 @@
-"""CLI for cord: cord run "goal" [options]."""
+"""CLI for cord: cord run "goal" [options] | cord daemon [options]."""
 
 from __future__ import annotations
 
@@ -8,21 +8,34 @@ from pathlib import Path
 from cord.runtime.engine import Engine
 
 
+def _parse_flag(args: list[str], flag: str, default: str | None = None) -> str | None:
+    """Extract a --flag value from args list."""
+    if flag in args:
+        idx = args.index(flag)
+        if idx + 1 < len(args):
+            return args[idx + 1]
+    return default
+
+
 def main() -> None:
-    """CLI entry point: cord run "goal" [--budget <usd>] [--model <model>]."""
+    """CLI entry point: cord run | cord daemon."""
     args = sys.argv[1:]
 
     if not args or args[0] in ("-h", "--help", "help"):
         print("Usage:")
-        print('  cord run "goal description" [--budget <usd>] [--model <model>]')
-        print('  cord run plan.md [--budget <usd>] [--model <model>]')
+        print('  cord run "goal description" [--budget <usd>] [--model <model>] [--log-tools]')
+        print('  cord run plan.md [--budget <usd>] [--model <model>] [--log-tools]')
+        print('  cord daemon [--budget <usd>] [--model <model>] [--log-tools]')
         sys.exit(0)
 
     command = args[0]
+    budget = float(_parse_flag(args, "--budget", "2.0"))
+    model = _parse_flag(args, "--model", "sonnet")
+    log_tools_flag = "--log-tools" in args
 
     if command == "run":
         if len(args) < 2:
-            print('Usage: cord run "goal description" [--budget <usd>] [--model <model>]', file=sys.stderr)
+            print('Usage: cord run "goal description" [--budget <usd>] [--model <model>] [--log-tools]', file=sys.stderr)
             sys.exit(1)
 
         goal_arg = args[1]
@@ -32,22 +45,22 @@ def main() -> None:
         else:
             goal = goal_arg
 
-        budget = 2.0
-        if "--budget" in args:
-            idx = args.index("--budget")
-            if idx + 1 < len(args):
-                budget = float(args[idx + 1])
-
-        model = "sonnet"
-        if "--model" in args:
-            idx = args.index("--model")
-            if idx + 1 < len(args):
-                model = args[idx + 1]
-
-        engine = Engine(goal, max_budget_usd=budget, model=model)
+        engine = Engine(goal, max_budget_usd=budget, model=model,
+                        log_tools=log_tools_flag)
         engine.run()
+
+    elif command == "daemon":
+        engine = Engine(
+            goal="(daemon — root managed by Claude Code)",
+            max_budget_usd=budget,
+            model=model,
+            fresh_db=False,
+            skip_root_synthesis=True,
+            log_tools=log_tools_flag,
+        )
+        engine.run_daemon()
 
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
-        print("Commands: run", file=sys.stderr)
+        print("Commands: run, daemon", file=sys.stderr)
         sys.exit(1)
