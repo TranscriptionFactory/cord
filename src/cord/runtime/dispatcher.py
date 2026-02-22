@@ -100,7 +100,8 @@ def launch_agent(
         fout = open(log_dir / f"{node_num}.stdout.log", "a")
         ferr = open(log_dir / f"{node_num}.stderr.log", "a")
         process = subprocess.Popen(
-            cmd, stdout=fout, stderr=ferr, text=True, cwd=cwd,
+            cmd, stdin=subprocess.DEVNULL,
+            stdout=fout, stderr=ferr, text=True, cwd=cwd,
         )
         # Safe to close — child process has its own file descriptors
         fout.close()
@@ -108,6 +109,7 @@ def launch_agent(
     else:
         process = subprocess.Popen(
             cmd,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

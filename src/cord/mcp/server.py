@@ -229,7 +229,8 @@ def run_tree(goal: str, prompt: str = "", budget: float = 2.0,
     _daemon_logs.extend([fout, ferr])
 
     _daemon_proc = subprocess.Popen(
-        cmd, stdout=fout, stderr=ferr, cwd=project_dir,
+        cmd, stdin=subprocess.DEVNULL,
+        stdout=fout, stderr=ferr, cwd=project_dir,
     )
 
     return json.dumps({
