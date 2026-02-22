@@ -139,7 +139,13 @@ class Engine:
                 pending = [n for n in self.db.all_nodes() if n["status"] == "pending"]
                 if pending:
                     self._log(f"Stuck: {len(pending)} pending nodes with unmet dependencies")
-                break
+                    break
+                elif self.skip_root_synthesis:
+                    # Daemon mode: keep polling for new spawn() calls
+                    time.sleep(self.poll_interval)
+                    continue
+                else:
+                    break
 
             time.sleep(self.poll_interval)
 
@@ -202,16 +208,16 @@ class Engine:
         if not children:
             return
 
+        successful = [c for c in children if c["status"] == "complete"]
+        if not successful:
+            self.db.update_status(parent_id, "failed")
+            return
+
         # Skip synthesis for root when in daemon mode (Claude Code synthesizes)
         if self.skip_root_synthesis:
             root = self.db.get_root()
             if root and parent_id == root["node_id"]:
                 return
-
-        successful = [c for c in children if c["status"] == "complete"]
-        if not successful:
-            self.db.update_status(parent_id, "failed")
-            return
 
         parent = self.db.get_node(parent_id)
         if not parent:
