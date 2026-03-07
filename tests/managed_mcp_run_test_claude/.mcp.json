@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "cord": {
+            "command": "uv",
+            "args": [
+                "run",
+                "--project",
+                "/ihome/djishnu/aar126/shellconfig/claude/_HELPFUL_GITHUB_REPOS/cord",
+                "cord-mcp-server",
+                "--log-tools"
+            ]
+        }
+    }
+}
