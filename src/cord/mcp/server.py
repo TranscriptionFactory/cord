@@ -126,8 +126,8 @@ def _node_to_json(node: dict) -> dict:
         d["returns"] = node["returns"]
     if node.get("result"):
         d["result"] = node["result"]
-    if node.get("blocked_by"):
-        d["blocked_by"] = node["blocked_by"]
+    if node.get("needs"):
+        d["needs"] = node["needs"]
     if node.get("children"):
         d["children"] = [_node_to_json(c) for c in node["children"]]
     return d
@@ -269,82 +269,20 @@ def read_node(node_id: str) -> str:
 
 
 @mcp.tool()
-@logged
-def read_logs(node_id: str, stream: str = "stdout", tail: int = 100) -> str:
-    """Read an agent's log output. Use to inspect what an agent is doing
-    or has done — especially useful for debugging failed nodes.
-
-    Args:
-        node_id: Node ID (e.g. '#2').
-        stream: 'stdout' for agent output, 'stderr' for Claude CLI progress.
-        tail: Number of lines to return from the end (default 100, 0 for all).
-    """
-    if stream not in ("stdout", "stderr"):
-        return json.dumps({"error": "stream must be 'stdout' or 'stderr'"})
-
-    cord_dir = Path(db_path).parent
-    node_num = node_id.lstrip("#")
-    log_path = cord_dir / "agents" / f"{node_num}.{stream}.log"
-
-    if not log_path.exists():
-        return json.dumps({
-            "error": f"No {stream} log for {node_id}",
-            "path": str(log_path),
-        })
-
-    text = log_path.read_text()
-    if tail > 0:
-        lines = text.splitlines()
-        if len(lines) > tail:
-            text = "\n".join(lines[-tail:])
-
-    return json.dumps({
-        "node_id": node_id,
-        "stream": stream,
-        "lines": len(text.splitlines()),
-        "content": text,
-    })
-
-
-@mcp.tool()
-@logged
-def spawn(goal: str, prompt: str = "", returns: str = "text",
-          blocked_by: list[str] | None = None) -> str:
-    """Create a child task under the root node. The daemon launches it as
-    a Claude subprocess. In Mode 2, use this to decompose your work. In
-    Mode 3, use this to inject additional work into a running tree.
-    Use blocked_by to declare dependencies (e.g. ['#2', '#3'])."""
-    if err := _require_agent_id():
-        return err
+def create(goal: str, prompt: str = "", returns: str = "text",
+           needs: list[str] | None = None) -> str:
+    """Create a child task under your node.
+    Use needs to declare dependencies on other node IDs (e.g. ['#2', '#3']).
+    The task won't start until all needed nodes complete. Their full results
+    will be injected into the child's prompt."""
     db = _get_db()
     new_id = db.create_node(
-        node_type="spawn",
+        node_type="task",
         goal=goal,
         parent_id=agent_id,
         prompt=prompt,
         returns=returns,
-        blocked_by=blocked_by,
-    )
-    return json.dumps({"created": new_id, "goal": goal})
-
-
-@mcp.tool()
-@logged
-def fork(goal: str, prompt: str = "", returns: str = "text",
-         blocked_by: list[str] | None = None) -> str:
-    """Create a child that inherits completed sibling results as context.
-    Like spawn(), but the child sees what siblings have already produced.
-    Use for iterative refinement or tasks that build on prior work."""
-    if err := _require_agent_id():
-        return err
-    db = _get_db()
-    new_id = db.create_node(
-        node_type="fork",
-        goal=goal,
-        parent_id=agent_id,
-        prompt=prompt,
-        returns=returns,
-        blocked_by=blocked_by,
+        needs=needs,
     )
     return json.dumps({"created": new_id, "goal": goal})
 
