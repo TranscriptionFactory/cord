@@ -1,10 +1,12 @@
-"""Launch claude CLI processes for cord nodes."""
+"""Launch agent processes for cord nodes."""
 
 from __future__ import annotations
 
 import json
 import subprocess
 from pathlib import Path
+
+from cord.runtime.backends import AgentBackend, ClaudeCodeBackend
 
 
 # Cord's own project root (where pyproject.toml lives), for uv run --project
@@ -60,8 +62,9 @@ def launch_agent(
     log_tools: bool = False,
     log_dir: Path | None = None,
     allowed_tools: list[str] | None = None,
+    backend: AgentBackend | None = None,
 ) -> subprocess.Popen[str]:
-    """Launch a claude CLI process for a node.
+    """Launch an agent process for a node.
 
     Args:
         log_dir: If set, write agent stdout/stderr to log files in this
@@ -70,7 +73,11 @@ def launch_agent(
         allowed_tools: If set, restrict agent to these tools via --allowedTools.
             If None (default), agent can use all available tools (built-in +
             MCP servers from global config and cord's own server).
+        backend: Agent backend to use. Defaults to ClaudeCodeBackend.
     """
+    if backend is None:
+        backend = ClaudeCodeBackend()
+
     mcp_config = generate_mcp_config(db_path, node_id, log_tools=log_tools)
 
     config_dir = db_path.parent / ".cord"
@@ -78,17 +85,13 @@ def launch_agent(
     config_path = config_dir / f"mcp-{node_id.lstrip('#')}.json"
     config_path.write_text(json.dumps(mcp_config, indent=2))
 
-    cmd = [
-        "claude",
-        "-p", prompt,
-        "--model", model,
-        "--mcp-config", str(config_path),
-        "--dangerously-skip-permissions",
-        "--max-budget-usd", str(max_budget_usd),
-    ]
-
-    if allowed_tools is not None:
-        cmd.extend(["--allowedTools", " ".join(allowed_tools)])
+    cmd = backend.build_command(
+        prompt,
+        model=model,
+        mcp_config_path=config_path,
+        max_budget_usd=max_budget_usd,
+        allowed_tools=allowed_tools,
+    )
 
     cwd = str(work_dir) if work_dir else str(db_path.parent)
 

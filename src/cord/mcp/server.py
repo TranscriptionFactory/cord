@@ -1,6 +1,6 @@
 """MCP server for cord — stdio transport, one per agent.
 
-Each claude CLI spawns its own instance via the MCP config.
+Each agent process spawns its own instance via the MCP config.
 State is shared through SQLite (WAL mode for concurrent access).
 """
 
@@ -168,7 +168,7 @@ def init_tree(goal: str) -> str:
 @mcp.tool()
 @logged
 def run_tree(goal: str, prompt: str = "", budget: float = 2.0,
-             model: str = "sonnet") -> str:
+             model: str = "sonnet", backend: str = "claude") -> str:
     """Launch an autonomous multi-agent tree (Mode 3 — recommended).
 
     Cord creates a root agent, which decomposes the goal into subtasks,
@@ -180,7 +180,8 @@ def run_tree(goal: str, prompt: str = "", budget: float = 2.0,
         goal: What the root agent should accomplish.
         prompt: Optional detailed instructions/context for the root agent.
         budget: Max USD per agent subprocess.
-        model: Claude model for agents (sonnet, opus, haiku).
+        model: Model identifier passed to the agent backend.
+        backend: Agent backend to use (default: claude).
 
     After calling run_tree:
       1. Poll read_tree() periodically to monitor progress
@@ -217,7 +218,8 @@ def run_tree(goal: str, prompt: str = "", budget: float = 2.0,
     # Start daemon with --launch-root
     cord_dir = db_file.parent
     cmd = ["cord", "daemon", "--launch-root",
-           "--budget", str(budget), "--model", model]
+           "--budget", str(budget), "--model", model,
+           "--backend", backend]
     if log_tools:
         cmd.append("--log-tools")
 

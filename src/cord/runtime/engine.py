@@ -8,6 +8,7 @@ from pathlib import Path
 
 from cord.db import CordDB
 from cord.prompts import build_agent_prompt, build_synthesis_prompt
+from cord.runtime.backends import AgentBackend, ClaudeCodeBackend
 from cord.runtime.dispatcher import launch_agent
 from cord.runtime.process_manager import ProcessManager
 
@@ -29,6 +30,7 @@ class Engine:
         fresh_db: bool = True,
         skip_root_synthesis: bool = False,
         log_tools: bool = False,
+        backend: AgentBackend | None = None,
     ):
         self.goal = goal
         self.project_dir = (project_dir or Path.cwd()).resolve()
@@ -42,6 +44,7 @@ class Engine:
         self.model = model
         self.skip_root_synthesis = skip_root_synthesis
         self.log_tools = log_tools
+        self.backend = backend or ClaudeCodeBackend()
         self.process_manager = ProcessManager()
         self.db = CordDB(self.db_path)
         self._last_tree_hash = ""
@@ -85,7 +88,7 @@ class Engine:
             self._log("cord daemon (managed run): launching root + children")
         else:
             self._log("cord daemon: watching .cord/cord.db ...")
-            self._log("  Root agent is Claude Code. Spawned children will be launched here.")
+            self._log("  Root agent is external. Spawned children will be launched here.")
         self._log("")
 
         try:
@@ -96,7 +99,7 @@ class Engine:
             for node in self.db.all_nodes():
                 if node["status"] == "active":
                     root = self.db.get_root()
-                    # Skip root cancellation only when Claude Code owns it
+                    # Skip root cancellation only when external agent owns it
                     if not launch_root and root and node["node_id"] == root["node_id"]:
                         continue
                     self.db.update_status(node["node_id"], "cancelled")
@@ -122,7 +125,7 @@ class Engine:
                 nid = node["node_id"]
                 if nid in active:
                     continue
-                # In daemon mode, skip the root node (Claude Code manages it)
+                # In daemon mode, skip the root node (external agent manages it)
                 if self.skip_root_synthesis:
                     root = self.db.get_root()
                     if root and nid == root["node_id"]:
@@ -167,6 +170,7 @@ class Engine:
             model=self.model,
             log_tools=self.log_tools,
             log_dir=log_dir,
+            backend=self.backend,
         )
         stdout_path = log_dir / f"{node_id.lstrip('#')}.stdout.log"
         self.process_manager.register(node_id, process, stdout_path=stdout_path)
@@ -213,7 +217,7 @@ class Engine:
             self.db.update_status(parent_id, "failed")
             return
 
-        # Skip synthesis for root when in daemon mode (Claude Code synthesizes)
+        # Skip synthesis for root when in daemon mode (external agent synthesizes)
         if self.skip_root_synthesis:
             root = self.db.get_root()
             if root and parent_id == root["node_id"]:
@@ -235,6 +239,7 @@ class Engine:
             model=self.model,
             log_tools=self.log_tools,
             log_dir=log_dir,
+            backend=self.backend,
         )
         stdout_path = log_dir / f"{parent_id.lstrip('#')}.stdout.log"
         self.process_manager.register(parent_id, process, stdout_path=stdout_path)
