@@ -1,6 +1,6 @@
 # Cord
 
-A coordination protocol for trees of Claude Code agents.
+A coordination protocol for trees of AI coding agents.
 
 One goal in, multiple agents out. They decompose, parallelize, wait on dependencies, and synthesize — all through a shared SQLite database.
 
@@ -31,8 +31,7 @@ No workflow was hardcoded. The agent built this tree at runtime.
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude` command available)
-- An Anthropic API key with sufficient credits
+- An agent CLI that supports MCP servers (default: [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code), see [Custom backends](#custom-backends) for alternatives)
 
 ## Install
 
@@ -53,6 +52,9 @@ cord run plan.md
 
 # Control budget and model
 cord run "goal" --budget 5.0 --model opus
+
+# Use a different agent backend
+cord run "goal" --backend my-agent
 ```
 
 **Options:**
@@ -60,7 +62,8 @@ cord run "goal" --budget 5.0 --model opus
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--budget` | 2.0 | Max USD per agent subprocess |
-| `--model` | sonnet | Claude model (sonnet, opus, haiku) |
+| `--model` | sonnet | Model identifier passed to the backend |
+| `--backend` | claude | Agent backend (see [Custom backends](#custom-backends)) |
 
 ## How it works
 
@@ -126,8 +129,9 @@ src/cord/
     db.py                   # SQLite (CordDB class, WAL mode)
     prompts.py              # Prompt assembly for agents
     runtime/
+        backends.py         # AgentBackend protocol + built-in backends
         engine.py           # Main loop, TUI
-        dispatcher.py       # Launch claude CLI processes
+        dispatcher.py       # Launch agent processes
         process_manager.py  # Track subprocesses
     mcp/
         server.py           # MCP tools (one server per agent)
@@ -151,13 +155,92 @@ The `pause`, `resume`, and `modify` tools were added because Claude independentl
 
 Each agent subprocess has its own Claude API budget (set via `--budget`). A simple 2-node task costs ~$0.10. The demo fintech report (4 agents + synthesis) costs ~$2-4. Costs scale with the number of agents and their complexity.
 
+## Custom backends
+
+Cord is agent-agnostic. The `AgentBackend` protocol in `src/cord/runtime/backends.py` defines how agent subprocesses are launched. Any CLI agent that supports MCP servers can be used.
+
+### The protocol
+
+A backend is a class with two things:
+
+```python
+from pathlib import Path
+from cord.runtime.backends import AgentBackend, BACKENDS
+
+class MyAgentBackend:
+    name: str = "my-agent"
+
+    def build_command(
+        self,
+        prompt: str,
+        *,
+        model: str,
+        mcp_config_path: Path,
+        max_budget_usd: float,
+        allowed_tools: list[str] | None = None,
+    ) -> list[str]:
+        """Return the argv list to launch one agent subprocess."""
+        return [
+            "my-agent-cli",
+            "--prompt", prompt,
+            "--model", model,
+            "--mcp-config", str(mcp_config_path),
+            "--budget", str(max_budget_usd),
+        ]
+```
+
+- `name` — identifier used with `--backend` on the CLI and `backend` in `run_tree()`
+- `build_command()` — returns the full command list. Cord handles process lifecycle, stdio redirection, and working directory. Your backend just builds the argv.
+
+The `mcp_config_path` points to a JSON file cord generates with its MCP server config. Your agent CLI must load this so the agent gets access to cord's coordination tools (`create`, `complete`, `read_tree`, etc.).
+
+### Registering a backend
+
+Add your class to the `BACKENDS` dict in `backends.py`:
+
+```python
+BACKENDS: dict[str, type[AgentBackend]] = {
+    "claude": ClaudeCodeBackend,
+    "my-agent": MyAgentBackend,
+}
+```
+
+Then use it:
+
+```bash
+cord run "goal" --backend my-agent --model gpt-4o
+```
+
+Or via MCP:
+
+```python
+run_tree("goal", backend="my-agent", model="gpt-4o")
+```
+
+### Requirements for a compatible agent CLI
+
+Your agent CLI must:
+
+1. **Accept a prompt** — run non-interactively with a provided prompt
+2. **Load MCP config** — read the JSON file at `mcp_config_path` and connect to cord's stdio MCP server
+3. **Run to completion** — exit with code 0 on success, non-zero on failure
+4. **Output result to stdout** — if the agent doesn't call `complete()` via MCP, cord uses stdout as the result
+
+The `--model` and `--budget` flags are passed through as-is — your backend interprets them however it wants (or ignores them).
+
+### Built-in backends
+
+| Name | CLI | Description |
+|------|-----|-------------|
+| `claude` | `claude` | Claude Code CLI (default) |
+
 ## Limitations
 
 - Single machine only. Agents are local processes.
 - No web UI — terminal TUI only.
 - No mid-execution message injection (pause/modify/resume requires relaunch).
 - Each agent gets its own MCP server process (~200ms startup overhead).
-- Claude Code CLI must be installed and authenticated.
+- Requires an agent CLI that supports MCP servers (see [Custom backends](#custom-backends)).
 
 ## Alternative implementations
 
