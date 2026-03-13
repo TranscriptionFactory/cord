@@ -192,7 +192,7 @@ class MyAgentBackend:
 - `name` — identifier used with `--backend` on the CLI and `backend` in `run_tree()`
 - `build_command()` — returns the full command list. Cord handles process lifecycle, stdio redirection, and working directory. Your backend just builds the argv.
 
-The `mcp_config_path` points to a JSON file cord generates with its MCP server config. Your agent CLI must load this so the agent gets access to cord's coordination tools (`create`, `complete`, `read_tree`, etc.).
+The `mcp_config_path` points to a JSON file cord generates with its MCP server config. Your agent CLI must load this so the agent gets access to cord's coordination tools (`create`, `complete`, `read_tree`, etc.). If your agent doesn't support a `--mcp-config` flag, your backend can convert the JSON into whatever format the agent expects (see `CodexBackend` for an example that writes a `.codex/config.toml`).
 
 ### Registering a backend
 
@@ -233,6 +233,13 @@ The `--model` and `--budget` flags are passed through as-is — your backend int
 | Name | CLI | Description |
 |------|-----|-------------|
 | `claude` | `claude` | Claude Code CLI (default) |
+| `codex` | `codex exec` | OpenAI Codex CLI |
+
+**Codex notes:** Codex doesn't support a per-invocation `--mcp-config` flag. The `codex` backend automatically converts cord's MCP config JSON into a project-scoped `.codex/config.toml` before each launch. Codex also has no budget flag, so `--budget` is ignored. Usage:
+
+```bash
+cord run "goal" --backend codex --model o4-mini
+```
 
 ## Limitations
 
